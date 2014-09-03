@@ -1,0 +1,5 @@
+.DS_Store
+.idea/
+packages
+packages/
+pubspec.lock
