@@ -1,6 +1,8 @@
 name: less_transformer
 version: 0.1.0
 author: Farata Systems LLC. <info@faratasystems.com>
+homepage: https://github.com/Farata/dart-less-transformer
+
 description: >
   Pub transformer that translates LESS files into CSS using external
   tool.
