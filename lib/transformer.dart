@@ -20,13 +20,26 @@ class LessTransformer extends Transformer {
 
   @override
   apply(Transform transform) {
-    var id = transform.primaryInput.id;
-    var newId = id.changeExtension('.css');
-    transform.logger.info('Compiling to ${newId.path}', asset: id);
+    var oldId = transform.primaryInput.id;
+    var newId = oldId.changeExtension('.css');
 
-    return Process.run(_options.executable, ['${id.path}']).then((result) {
-      transform.addOutput(new Asset.fromString(newId, result.stdout));
-    });
+    var separator = Platform.isWindows ? ';' : ':';
+    var paths = _options.include_path.isEmpty ? '' :
+      '--include-path=${_options.include_path.join(separator)}';
+
+    return Process.run(_options.executable, [paths, '${oldId.path}'])
+        .then((result) {
+          if (result.exitCode != 0) {
+            transform.logger.error(result.stderr, asset: oldId);
+            return;
+          }
+
+          transform.addOutput(new Asset.fromString(newId, result.stdout));
+          transform.logger.info('Compiled to ${newId.path}', asset: oldId);
+          if (_options.replace) {
+            transform.consumePrimary();
+          }
+        });
   }
 
   /// Matches [Asset]'s path against configured glob patterns.
@@ -42,29 +55,35 @@ class LessTransformer extends Transformer {
 /// Parses and validates configured transformer's settings, provides default
 /// values for [TransformOptions].
 TransformOptions _parseSettings(Map args) {
-  // Fail parsing if invalid value specified for `src` parameter.
-  var src = args['src'];
-  if (src != null) {
-    if (src is! String && src is! List<String>) {
-      throw 'Invalid value of `src` parameter. Should be either a string or a '
-        'list of strings';
-    }
-  }
-
-  // Expect `lessc` available on the PATH if path to the executable isn't
-  // explicitly configured for the transformer.
-  var executable = 'lessc';
-  if (args['executable'] == null) {
-    executable = args['executable'];
-  }
-
-  return new TransformOptions(executable: executable, src: src);
+  return new TransformOptions(
+      // Expect `lessc` available on the PATH if path to the executable isn't
+      // explicitly configured for the transformer.
+      executable: _readStringValue(args, 'executable', 'lessc'),
+      include_path: _readStringListValue(args, 'include_path'),
+      replace: _readBoolValue(args, 'replace', false),
+      src: _readStringListValue(args, 'src'));
 }
 
 /// Options used by [LessTransformer].
 class TransformOptions {
   /// Path to `lessc` executable.
   final String executable;
+
+  /// [String] or [Lisr<String>], where each value represents LESS include path
+  /// that will be passed to the LESS [executable]. Paths can be absolute or
+  /// relative to the package root. Example:
+  ///
+  ///   transformers:
+  ///   - less_transformer:
+  ///       include_path:
+  ///         - web/bower_components
+  ///         - web/styles
+  ///
+  final List<String> include_path;
+
+  /// If `true` replaces LESS files with CSS ones. Otherwise keeps both type of
+  /// files. Default is `false`.
+  final bool replace;
 
   /// [String] or [List<String>], where each value represents glob pattern that
   /// will be used to match `*.less` files. Example:
@@ -77,5 +96,50 @@ class TransformOptions {
   ///
   final src;
 
-  TransformOptions({this.executable, this.src});
+  TransformOptions({
+    this.executable,
+    this.include_path,
+    this.replace,
+    this.src});
+}
+
+bool _readBoolValue(Map args, String name, [bool defaultValue]) {
+  var value = args[name];
+  if (value == null) return defaultValue;
+  if (value is! bool) {
+    print('LESS transformer parameter "$name" value must be a bool');
+    return defaultValue;
+  }
+  return value;
+}
+
+String _readStringValue(Map args, String name, [String defaultValue]) {
+  var value = args[name];
+  if (value == null) return defaultValue;
+  if (value is! String) {
+    print('LESS transformer parameter "$name" value must be a string');
+    return defaultValue;
+  }
+  return value;
+}
+
+List<String> _readStringListValue(Map args, String name) {
+  var value = args[name];
+  if (value == null) return [];
+  var results = [];
+  bool error;
+  if (value is List) {
+    results = value;
+    error = value.any((e) => e is! String);
+  } else if (value is String) {
+    results = [value];
+    error = false;
+  } else {
+    error = true;
+  }
+  if (error) {
+    print('LESS transformer parameter "$name" value must be either a string or '
+        'a list of strings');
+  }
+  return results;
 }
